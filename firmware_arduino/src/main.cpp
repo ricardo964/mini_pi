@@ -1,79 +1,60 @@
 #include <Arduino.h>
-#include <math.h>
 #include "config.hpp"
+#include "wheel.hpp"
 
-volatile unsigned long right_last_pulse_ms = 0;
-volatile unsigned long left_last_pulse_ms = 0;
+Wheel right_wheel;
+Wheel left_wheel;
 
-volatile unsigned long right_delta_ms = 0;
-volatile unsigned long left_delta_ms = 0;
-
-float right_angular_velocity = 0;
-float left_angular_velocity = 0;
-
-constexpr float ANGLE_PER_PULSE = PI / 18.0;
-
-void update_right_angular_velocity()
-{
-  unsigned long current_ms = millis();
-
-  right_delta_ms = current_ms - right_last_pulse_ms;
-  right_last_pulse_ms = current_ms;
+void isr_right_tachometer() {
+  right_wheel.tach_isr();
 }
 
-void update_left_angular_velocity()
-{
-  unsigned long current_ms = millis();
-
-  left_delta_ms = current_ms - left_last_pulse_ms;
-  left_last_pulse_ms = current_ms;
+void isr_left_tachometer() {
+  left_wheel.tach_isr();
 }
 
-void attach_interrupt_tachometer()
-{
+unsigned long next_control_us = 0;
+
+void setup() {
+  Serial.begin(SERIAL_BAUD);
+
+  right_wheel.init(RIGHT_PWM_PIN, RIGHT_TACH_PIN, DEFAULT_TARGET_VELOCITY);
+  left_wheel.init(LEFT_PWM_PIN, LEFT_TACH_PIN, DEFAULT_TARGET_VELOCITY);
+
   attachInterrupt(
-      digitalPinToInterrupt(right_tachometer_pin),
-      update_right_angular_velocity,
+      digitalPinToInterrupt(RIGHT_TACH_PIN),
+      isr_right_tachometer,
       RISING);
 
   attachInterrupt(
-      digitalPinToInterrupt(left_tachometer_pin),
-      update_left_angular_velocity,
+      digitalPinToInterrupt(LEFT_TACH_PIN),
+      isr_left_tachometer,
       RISING);
+
+  delay(START_DELAY_MS);
+
+  next_control_us = micros();
 }
 
-void setup()
-{
-  Serial.begin(115200);
+void loop() {
+  unsigned long now_us = micros();
 
-  pinMode(right_tachometer_pin, INPUT);
-  pinMode(left_tachometer_pin, INPUT);
+  if (now_us - next_control_us >= CONTROL_PERIOD_US) {
+    next_control_us += CONTROL_PERIOD_US;
 
-  attach_interrupt_tachometer();
+    if (now_us - next_control_us > CONTROL_PERIOD_US * 4) {
+      next_control_us = now_us;
+    }
 
-  delay(start_delay);
-}
+    right_wheel.update(CONTROL_DT_SEC);
+    left_wheel.update(CONTROL_DT_SEC);
 
-void loop()
-{
-  unsigned long right_dt;
-  unsigned long left_dt;
-
-  noInterrupts();
-  right_dt = right_delta_ms;
-  left_dt = left_delta_ms;
-  interrupts();
-
-  if (right_dt > 0)
-    right_angular_velocity = ANGLE_PER_PULSE / (right_dt / 1000.0);
-
-  if (left_dt > 0)
-    left_angular_velocity = ANGLE_PER_PULSE / (left_dt / 1000.0);
-
-  Serial.print("Right: ");
-  Serial.print(right_angular_velocity);
-  Serial.print(" rad/s | Left: ");
-  Serial.println(left_angular_velocity);
-
-  delay(10);
+    // Serial.print(right_wheel.current_velocity, 2);
+    // Serial.print(", ");
+    // Serial.print(right_wheel.control_output);
+    // Serial.print(", ");
+    // Serial.print(left_wheel.current_velocity, 2);
+    // Serial.print(", ");
+    // Serial.println(left_wheel.control_output);
+  }
 }
