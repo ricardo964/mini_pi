@@ -20,6 +20,12 @@ constexpr unsigned long CONTROL_PERIOD_MS = 20UL;
 constexpr unsigned long CONTROL_PERIOD_US = CONTROL_PERIOD_MS * 1000UL;
 constexpr float CONTROL_DT_SEC = CONTROL_PERIOD_MS / 1000.0f;
 
+constexpr unsigned long COMMAND_PERIOD_MS = 20UL;
+constexpr unsigned long COMMAND_PERIOD_US = COMMAND_PERIOD_MS * 1000UL;
+
+constexpr unsigned long TELEMETRY_PERIOD_MS = 20UL;
+constexpr unsigned long TELEMETRY_PERIOD_US = TELEMETRY_PERIOD_MS * 1000UL;
+
 constexpr float DEFAULT_TARGET_VELOCITY = 0.0f; // rad/s
 constexpr float KP = 27.0f;
 constexpr float KI = 30.0f;
