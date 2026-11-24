@@ -4,42 +4,41 @@ from std_msgs.msg import Float32MultiArray
 import serial
 import struct
 
-# 8 bytes + 2 bytes
-# struct Telemetry
-# {
-#   float left_wheel_velocity;
-#   float right_wheel_velocity;
-# };
+# Telemetry frame (Arduino -> ROS): 0xAA + 2 floats (8 bytes) + 0x55 = 10 bytes
+# struct Telemetry { float left_wheel_velocity; float right_wheel_velocity; };
+#
+# Command (ROS -> Arduino): 2 floats (8 bytes), no header
+# struct Command { float left_wheel_setpoint; float right_wheel_setpoint; };
 
-# 8 bytes
-# struct Command
-# {
-#   float left_wheel_setpoint;
-#   float right_wheel_setpoint;
-# };
+HEADER = 0xAA
+FOOTER = 0x55
+FRAME_SIZE = 10
+
 
 class ArduinoNode(Node):
     def __init__(self):
         super().__init__("arduino")
 
-        self.declare_parameter("port", "/dev/ttyACM1")
-        self.declare_parameter("baurate", 115200)
-        self.declare_parameter("read_hz", 50)
+        self.declare_parameter("port", "/dev/ttyACM0")
+        self.declare_parameter("baudrate", 115200)
+        self.declare_parameter("read_hz", 100)
 
         port = self.get_parameter("port").value
-        baud = self.get_parameter("baurate").value
-        read_hx = self.get_parameter("read_hz").value
+        baudrate = self.get_parameter("baudrate").value
+        read_hz = self.get_parameter("read_hz").value
 
         try:
             self.serial = serial.Serial(
                 port,
-                baudrate=baud,
+                baudrate=baudrate,
                 timeout=0,
                 write_timeout=0.1
             )
         except serial.SerialException as e:
             self.get_logger().fatal(f"fatal {port}: {e}")
             raise
+
+        self.rx_buffer = bytearray()
 
         self.wheels_velocities = self.create_publisher(
             Float32MultiArray,
@@ -50,66 +49,71 @@ class ArduinoNode(Node):
         self.setpoints = self.create_subscription(
             Float32MultiArray,
             "arduino/setpoints",
-            self.write_timer_cb,
+            self.setpoints_cb,
             10
         )
 
-        # timer
-        self.read_timer = self.create_timer(1/read_hx, self.read_timer_cb)
+        self.read_timer = self.create_timer(1 / read_hz, self.read_timer_cb)
 
     def read_timer_cb(self):
         try:
-            # 0xAA 0x55
-            while True:
-                byte = self.serial.read(1)
-                if byte == b'\xAA':
-                    buff = byte
-                    payload = self.serial.read(9)
+            data = self.serial.read(self.serial.in_waiting)
+        except serial.SerialException as e:
+            self.get_logger().error(f"serial read error: {e}")
+            return
 
-                    if len(payload) != 9:
-                        self.get_logger().error("Error invalid len")
-                        continue
+        if data:
+            self.rx_buffer.extend(data)
 
-                    buff += payload
+        while True:
+            start = self.rx_buffer.find(bytes([HEADER]))
 
-                    if buff[-1] == b'\x55':
-                        self.get_logger().error("error")
-                        continue
+            if start == -1:
+                self.rx_buffer.clear()
+                break
 
-                    telemetry_data = buff[1:-1]
+            # drop garbage before the header
+            del self.rx_buffer[:start]
 
-                    left_wheel_velocity = struct.unpack('f', telemetry_data[0:4])[0]
-                    right_wheel_velocity = struct.unpack('f', telemetry_data[4:8])[0]
+            if len(self.rx_buffer) < FRAME_SIZE:
+                break  # incomplete frame, wait for the next tick
 
-                    # self.get_logger().info(
-                    #     f"left_wheel_velocity {left_wheel_velocity}, right_wheel_velocity {right_wheel_velocity}"
-                    # )
+            if self.rx_buffer[FRAME_SIZE - 1] != FOOTER:
+                # false header: drop one byte and resync
+                del self.rx_buffer[0]
+                continue
 
-                    msg = Float32MultiArray()
-                    msg.data = [left_wheel_velocity, right_wheel_velocity]
-                    self.wheels_velocities.publish(msg)
+            frame = bytes(self.rx_buffer[:FRAME_SIZE])
+            del self.rx_buffer[:FRAME_SIZE]
 
-                    break
+            left_wheel_velocity, right_wheel_velocity = struct.unpack('<ff', frame[1:9])
 
-        except Exception as e:
-            self.get_logger().error("except")
-            raise
+            msg = Float32MultiArray()
+            msg.data = [left_wheel_velocity, right_wheel_velocity]
+            self.wheels_velocities.publish(msg)
 
-    def write_timer_cb(self, message: Float32MultiArray):
-        left_wheel_setpoint = message.data[0]
-        right_wheel_setpoint = message.data[1]
-        message = struct.pack('<f', left_wheel_setpoint) + struct.pack('<f', right_wheel_setpoint)
-        self.serial.write(message)
+    def setpoints_cb(self, message: Float32MultiArray):
+        if len(message.data) < 2:
+            self.get_logger().warn("setpoints needs 2 values")
+            return
+
+        payload = struct.pack('<ff', message.data[0], message.data[1])
+
+        try:
+            self.serial.write(payload)
+        except serial.SerialException as e:
+            self.get_logger().error(f"serial write error: {e}")
 
     def destroy_node(self):
         if hasattr(self, 'serial') and self.serial.is_open:
-            self.ser.close()
+            self.serial.close()
         super().destroy_node()
+
 
 def main(args=None):
     rclpy.init(args=args)
     nodo = ArduinoNode()
-    
+
     try:
         rclpy.spin(nodo)
     except KeyboardInterrupt:
@@ -117,6 +121,7 @@ def main(args=None):
     finally:
         nodo.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
