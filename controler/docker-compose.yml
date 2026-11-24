@@ -1,0 +1,14 @@
+services:
+  ros2_camera:
+    build: .
+    image: ros2_camera_lyrical
+    container_name: ros2_cam_container
+    network_mode: "host"
+    ipc: host
+    devices:
+      - "/dev/video0:/dev/video0"
+      - "/dev/ttyACM0:/dev/ttyACM0"
+    group_add:
+      - video
+      - dialout
+    restart: unless-stopped

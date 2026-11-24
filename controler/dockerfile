@@ -1,0 +1,20 @@
+FROM ros:lyrical-ros-base
+
+SHELL ["/bin/bash", "-c"]
+WORKDIR /ws
+
+COPY src/ src/
+
+RUN apt-get update && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -y && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN source /opt/ros/$ROS_DISTRO/setup.bash && \
+    colcon build --symlink-install
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["ros2", "launch", "nav", "robot.launch.py"]
