@@ -25,6 +25,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'nav = nav.nav:main'
         ],
     },
 )
