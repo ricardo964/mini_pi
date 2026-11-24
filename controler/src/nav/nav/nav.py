@@ -13,7 +13,6 @@ class State(Enum):
     START = auto()
     STOP = auto()
 
-
 class FiniteStateMachine:
     def __init__(self):
         self.current_state: State = State.STANDBY
@@ -144,7 +143,6 @@ def main(args=None):
     finally:
         nodo.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()
